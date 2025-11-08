@@ -1,0 +1,79 @@
+name: Deploy Trader (GCP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      vm_name:
+        description: "GCE VM name"
+        required: false
+        default: "trader-${{ github.run_id }}"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ secrets.GCP_REGION }}
+      GCP_ZONE: ${{ secrets.GCP_ZONE }}
+      VM_NAME: ${{ github.event.inputs.vm_name }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      # Secrets for the stack
+      BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+      BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Optional knobs (env, fallback defaults applied in cloud-init)
+      ALLOWED_SYMBOLS: ${{ secrets.ALLOWED_SYMBOLS }}
+      CONSENSUS_MIN: ${{ secrets.CONSENSUS_MIN }}
+      ASLF_THETA_BUY: ${{ secrets.ASLF_THETA_BUY }}
+      PROBE_SIZE_BPS: ${{ secrets.PROBE_SIZE_BPS }}
+      FRACTIONAL_KELLY_MAX: ${{ secrets.FRACTIONAL_KELLY_MAX }}
+      EXECUTOR_MODE: ${{ secrets.EXECUTOR_MODE }}
+      AGENT_MODE: ${{ secrets.AGENT_MODE }}
+      BINANCE_BASE: ${{ secrets.BINANCE_BASE }}
+      BINANCE_FRICTION_BASE: ${{ secrets.BINANCE_FRICTION_BASE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          install_components: compute
+
+      - name: Render cloud-init with secrets
+        run: |
+          set -euo pipefail
+          : "${VM_NAME:=${GITHUB_REPOSITORY##*/}-${GITHUB_RUN_ID}}"
+          export VM_NAME
+          envsubst < deploy/cloud-init.yaml > cloud-init.rendered.yaml
+          echo "Rendered cloud-init:"
+          head -n 40 cloud-init.rendered.yaml
+
+      - name: Create GCE VM (e2-micro Ubuntu 22.04)
+        run: |
+          set -euo pipefail
+          VM="${VM_NAME}"
+          Z="${GCP_ZONE:-us-central1-a}"
+          gcloud config set project "${GCP_PROJECT_ID}"
+          gcloud config set compute/zone "${Z}"
+          gcloud compute instances create "${VM}" \
+            --machine-type=e2-micro \
+            --image-family=ubuntu-2204-lts \
+            --image-project=ubuntu-os-cloud \
+            --metadata-from-file=user-data=cloud-init.rendered.yaml
+          IP="$(gcloud compute instances describe "${VM}" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')"
+          echo "PUBLIC_IP=${IP}" >> "$GITHUB_OUTPUT"
+          echo "PUBLIC_IP=${IP}"
+          echo "SSH tunnel:"
+          echo "ssh -N -L 8000:localhost:8000 -L 8001:localhost:8001 -L 8080:localhost:8080 ubuntu@${IP}"
+
+

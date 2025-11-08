@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: traderpw
+      POSTGRES_DB: mastertrader
+    ports: ["5432:5432"]
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=trader
+      - POSTGRES_PWD=traderpw
+      - POSTGRES_SEEDS=db
+      - POSTGRES_DB=temporal
+      - POSTGRES_VISIBILITY_DB=temporal_visibility
+    ports: ["7233:7233"]
+    depends_on: [db]
+    restart: unless-stopped
+
+  temporal-web:
+    image: temporalio/ui:latest
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    ports: ["8080:8080"]
+    depends_on: [temporal]
+    restart: unless-stopped
+
+  executor:
+    build:
+      context: ..
+      dockerfile: apps/executor/Dockerfile
+    env_file: ["../.env"]
+    ports: ["8001:8001"]
+    depends_on: [db]
+    restart: unless-stopped
+
+  agent_worker:
+    build:
+      context: ..
+      dockerfile: apps/temporal_worker/Dockerfile
+    env_file: ["../.env"]
+    environment:
+      - TEMPORAL_PYTHON_SDK_WORKFLOW_RUN_SANSBOXED=true
+      - TEMPORAL_PYTHON_SDK_WORKFLOW_DISABLE_SANDBOX=1
+      - TEMPORAL_PYTHON_SDK_DISABLE_SANDBOX=1
+      - TEMPORAL_WORKFLOW_SANDBOX_DISABLED=1
+    depends_on: [temporal, db]
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: apps/gateway/Dockerfile
+    env_file: ["../.env"]
+    ports: ["8000:8000"]
+    depends_on: [temporal]
+    restart: unless-stopped
+  dispatcher:
+    build:
+      context: ..
+      dockerfile: apps/dispatcher/Dockerfile
+    env_file: ["../.env"]
+    environment:
+      - GATEWAY_BASE=http://gateway:8000
+    depends_on: [gateway]
+    restart: unless-stopped
+
+volumes:
+  dbdata:
+
+

@@ -1,0 +1,23 @@
+{
+  "proposal": {
+    "action": "open",
+    "symbol": "BTCUSDT",
+    "side": "buy",
+    "size_bps_equity": 3.0,
+    "horizon_minutes": 30,
+    "thesis": "proof-mock",
+    "risk": {
+      "stop_loss_bps": 60,
+      "take_profit_bps": 120,
+      "max_slippage_bps": 3
+    },
+    "evidence": [
+      {
+        "url": "https://example.com",
+        "type": "news_headline"
+      }
+    ],
+    "confidence": 0.7
+  }
+}
+

@@ -1,0 +1,41 @@
+name: Teardown Trader (GCP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      vm_name:
+        description: "GCE VM name to delete"
+        required: true
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ secrets.GCP_REGION }}
+      GCP_ZONE: ${{ secrets.GCP_ZONE }}
+    steps:
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          install_components: compute
+
+      - name: Delete instance
+        run: |
+          set -euo pipefail
+          VM="${{ github.event.inputs.vm_name }}"
+          Z="${GCP_ZONE:-us-central1-a}"
+          gcloud config set project "${GCP_PROJECT_ID}"
+          gcloud config set compute/zone "${Z}"
+          gcloud compute instances delete "${VM}" --quiet || true
+          echo "Deleted ${VM}"
+
+
