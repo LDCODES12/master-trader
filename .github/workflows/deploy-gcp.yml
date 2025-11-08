@@ -49,6 +49,9 @@ jobs:
           project_id: ${{ env.GCP_PROJECT_ID }}
           install_components: compute
 
+      - name: Install envsubst
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+
       - name: Render cloud-init with secrets
         run: |
           set -euo pipefail
