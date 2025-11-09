@@ -45,15 +45,21 @@ async def submit_proposal(body: SubmitReq, background_tasks: BackgroundTasks, id
     run_id = idempotency_key or f"wf-{uuid.uuid4().hex[:8]}"
 
     async def _kickoff():
-        client = await Client.connect("temporal:7233")
-        await client.start_workflow(
-            TraderWorkflow.run,
-            body.proposal.model_dump(mode="json"),
-            id=run_id,
-            task_queue="trader-tq",
-        )
+        try:
+            client = await Client.connect("temporal:7233")
+            handle = await client.start_workflow(
+                TraderWorkflow.run,
+                body.proposal.model_dump(mode="json"),
+                id=run_id,
+                task_queue="trader-tq",
+            )
+            print(f"✅ Workflow {run_id} started: {handle.id}")
+        except Exception as e:
+            print(f"❌ Failed to start workflow {run_id}: {e}")
+            import traceback
+            traceback.print_exc()
 
-    background_tasks.add_task(asyncio.run, _kickoff())
+    background_tasks.add_task(_kickoff)
     return {"accepted": True, "workflow_id": run_id}
 
 
