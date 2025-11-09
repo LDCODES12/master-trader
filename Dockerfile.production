@@ -77,15 +77,29 @@ import glob
 dsn = os.getenv('PG_DSN')
 conn = psycopg.connect(dsn)
 
-# Run all migrations
-for migration_file in sorted(glob.glob('infra/migrations/*.sql')):
+# Run all migrations (skip 000_temporal.sql on cloud - database already exists)
+migration_files = sorted(glob.glob('infra/migrations/*.sql'))
+for migration_file in migration_files:
+    # Skip temporal database creation on cloud (database already exists)
+    if '000_temporal.sql' in migration_file:
+        print(f"⏭️  {migration_file} (skipped - database exists)")
+        continue
+    
     try:
         with open(migration_file, 'r') as f:
-            conn.execute(f.read())
-        conn.commit()
+            sql = f.read()
+            # Execute in autocommit mode for DDL statements
+            conn.autocommit = True
+            conn.execute(sql)
+            conn.autocommit = False
         print(f"✅ {migration_file}")
     except Exception as e:
+        # If error, try to continue with next migration
         print(f"⚠️  {migration_file}: {e}")
+        try:
+            conn.rollback()
+        except:
+            pass
 
 conn.close()
 PYEOF
