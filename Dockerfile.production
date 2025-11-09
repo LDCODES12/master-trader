@@ -34,13 +34,25 @@ DB_PASSWORD=${PGPASSWORD:-${DB_PASSWORD:-traderpw}}
 
 # Parse DATABASE_URL if provided (Railway/Render format)
 if [ -n "${DATABASE_URL:-}" ]; then
-    # Parse postgres://user:pass@host:port/dbname
-    DB_INFO=$(echo $DATABASE_URL | sed 's|postgres://||' | sed 's|@| |' | sed 's|:| |' | sed 's|/| |')
-    DB_USER=$(echo $DB_INFO | awk '{print $1}')
-    DB_PASSWORD=$(echo $DB_INFO | awk '{print $2}')
-    DB_HOST=$(echo $DB_INFO | awk '{print $3}')
-    DB_PORT=$(echo $DB_INFO | awk '{print $4}')
-    DB_NAME=$(echo $DB_INFO | awk '{print $5}')
+    # Parse postgresql://user:pass@host:port/dbname or postgresql://user:pass@host/dbname
+    # Remove protocol prefix
+    DB_INFO=$(echo $DATABASE_URL | sed 's|^postgresql://||' | sed 's|^postgres://||')
+    # Extract user:pass@host:port/dbname
+    DB_USER_PASS=$(echo $DB_INFO | cut -d'@' -f1)
+    DB_HOST_PORT_DB=$(echo $DB_INFO | cut -d'@' -f2)
+    DB_USER=$(echo $DB_USER_PASS | cut -d':' -f1)
+    DB_PASSWORD=$(echo $DB_USER_PASS | cut -d':' -f2-)
+    # Extract host:port/dbname
+    DB_HOST_PORT=$(echo $DB_HOST_PORT_DB | cut -d'/' -f1)
+    DB_NAME=$(echo $DB_HOST_PORT_DB | cut -d'/' -f2)
+    # Extract host and port
+    if echo "$DB_HOST_PORT" | grep -q ':'; then
+        DB_HOST=$(echo $DB_HOST_PORT | cut -d':' -f1)
+        DB_PORT=$(echo $DB_HOST_PORT | cut -d':' -f2)
+    else
+        DB_HOST=$DB_HOST_PORT
+        DB_PORT=5432
+    fi
 fi
 
 export PG_DSN="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
