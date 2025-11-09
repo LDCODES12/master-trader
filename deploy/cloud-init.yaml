@@ -1,5 +1,5 @@
-## cloud-init user-data for trader stack
 #cloud-config
+## cloud-init user-data for trader stack
 package_update: true
 package_upgrade: true
 packages:
@@ -7,6 +7,7 @@ packages:
   - docker-compose-plugin
   - git
   - jq
+  - curl
 
 users:
   - default
