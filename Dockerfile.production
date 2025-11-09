@@ -1,0 +1,90 @@
+# Production Dockerfile - Single container with everything
+# Works on Railway, Render, Fly.io, and any Docker platform
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create comprehensive startup script that handles everything
+RUN cat > /start.sh << 'STARTEOF'
+#!/bin/bash
+set -e
+
+echo "🚀 Starting MasterTrader..."
+
+# Use Railway/Render/Fly.io environment variables or defaults
+DB_HOST=${DATABASE_URL:-${PGHOST:-${DB_HOST:-localhost}}}
+DB_PORT=${PGPORT:-${DB_PORT:-5432}}
+DB_NAME=${PGDATABASE:-${DB_NAME:-mastertrader}}
+DB_USER=${PGUSER:-${DB_USER:-trader}}
+DB_PASSWORD=${PGPASSWORD:-${DB_PASSWORD:-traderpw}}
+
+# Parse DATABASE_URL if provided (Railway/Render format)
+if [ -n "${DATABASE_URL:-}" ]; then
+    # Parse postgres://user:pass@host:port/dbname
+    DB_INFO=$(echo $DATABASE_URL | sed 's|postgres://||' | sed 's|@| |' | sed 's|:| |' | sed 's|/| |')
+    DB_USER=$(echo $DB_INFO | awk '{print $1}')
+    DB_PASSWORD=$(echo $DB_INFO | awk '{print $2}')
+    DB_HOST=$(echo $DB_INFO | awk '{print $3}')
+    DB_PORT=$(echo $DB_INFO | awk '{print $4}')
+    DB_NAME=$(echo $DB_INFO | awk '{print $5}')
+fi
+
+export PG_DSN="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
+echo "📊 Database: ${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
+# Wait for database
+echo "⏳ Waiting for database..."
+until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" 2>/dev/null; do
+    echo "   Still waiting..."
+    sleep 2
+done
+echo "✅ Database ready!"
+
+# Run migrations
+echo "📦 Running migrations..."
+python3 << PYEOF
+import psycopg
+import os
+import glob
+
+dsn = os.getenv('PG_DSN')
+conn = psycopg.connect(dsn)
+
+# Run all migrations
+for migration_file in sorted(glob.glob('infra/migrations/*.sql')):
+    try:
+        with open(migration_file, 'r') as f:
+            conn.execute(f.read())
+        conn.commit()
+        print(f"✅ {migration_file}")
+    except Exception as e:
+        print(f"⚠️  {migration_file}: {e}")
+
+conn.close()
+PYEOF
+
+# Start gateway
+echo "🚀 Starting gateway on port ${PORT:-8000}..."
+exec python3 -m uvicorn apps.gateway.app:app --host 0.0.0.0 --port ${PORT:-8000}
+STARTEOF
+
+RUN chmod +x /start.sh
+
+EXPOSE 8000
+
+CMD ["/start.sh"]
