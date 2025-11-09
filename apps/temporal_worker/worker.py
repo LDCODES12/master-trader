@@ -20,17 +20,24 @@ from apps.temporal_worker.activities import (
 
 
 async def main():
+    # Get Temporal address from env or default
+    import os
+    temporal_address = os.getenv("TEMPORAL_ADDRESS", "temporal:7233")
+    
     # Robust connect: wait for Temporal to be ready
     attempt = 0
     delay = 1
     while True:
         try:
-            client = await Client.connect("temporal:7233")
+            client = await Client.connect(temporal_address)
             break
-        except Exception:
+        except Exception as e:
             attempt += 1
             if attempt > 60:
+                print(f"Failed to connect to Temporal at {temporal_address} after 60 attempts")
                 raise
+            if attempt % 10 == 0:
+                print(f"Waiting for Temporal at {temporal_address}... (attempt {attempt})")
             await asyncio.sleep(delay)
             delay = min(delay * 2, 5)
     worker = Worker(

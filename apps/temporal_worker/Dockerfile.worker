@@ -1,0 +1,72 @@
+# Temporal Worker Dockerfile for Render Background Worker
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create startup script
+RUN cat > /start-worker.sh << 'WORKEREOF'
+#!/bin/bash
+set -e
+
+echo "🔄 Starting Temporal Worker..."
+
+# Parse DATABASE_URL if provided
+if [ -n "${DATABASE_URL:-}" ]; then
+    DB_INFO=$(echo $DATABASE_URL | sed 's|^postgresql://||' | sed 's|^postgres://||')
+    DB_USER_PASS=$(echo $DB_INFO | cut -d'@' -f1)
+    DB_HOST_PORT_DB=$(echo $DB_INFO | cut -d'@' -f2)
+    DB_USER=$(echo $DB_USER_PASS | cut -d':' -f1)
+    DB_PASSWORD=$(echo $DB_USER_PASS | cut -d':' -f2-)
+    DB_HOST_PORT=$(echo $DB_HOST_PORT_DB | cut -d'/' -f1)
+    if echo "$DB_HOST_PORT" | grep -q ':'; then
+        DB_HOST=$(echo $DB_HOST_PORT | cut -d':' -f1)
+        DB_PORT=$(echo $DB_HOST_PORT | cut -d':' -f2)
+    else
+        DB_HOST=$DB_HOST_PORT
+        DB_PORT=5432
+    fi
+fi
+
+# Temporal address (default to localhost for local, or env var)
+TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
+
+echo "📊 Database: ${DB_HOST:-localhost}:${DB_PORT:-5432}"
+echo "🔄 Temporal: ${TEMPORAL_ADDRESS}"
+
+# Wait for database
+if [ -n "${DATABASE_URL:-}" ]; then
+    echo "⏳ Waiting for database..."
+    until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" 2>/dev/null; do
+        echo "   Still waiting..."
+        sleep 2
+    done
+    echo "✅ Database ready!"
+fi
+
+# Start worker
+echo "🚀 Starting Temporal worker..."
+export TEMPORAL_PYTHON_SDK_WORKFLOW_RUN_SANSBOXED=true
+export TEMPORAL_PYTHON_SDK_WORKFLOW_DISABLE_SANDBOX=1
+export TEMPORAL_PYTHON_SDK_DISABLE_SANDBOX=1
+export TEMPORAL_WORKFLOW_SANDBOX_DISABLED=1
+
+exec python3 -m apps.temporal_worker.worker
+WORKEREOF
+
+RUN chmod +x /start-worker.sh
+
+CMD ["/start-worker.sh"]
+
