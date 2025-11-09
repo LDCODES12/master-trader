@@ -1,6 +1,7 @@
 import os, math
 import psycopg
 import httpx
+from apps.analytics.positions import update_position_prices, get_open_positions, get_portfolio_exposure
 
 PG_DSN = os.getenv("PG_DSN", "postgresql://trader:traderpw@db:5432/mastertrader")
 EXECUTOR_BASE = os.getenv("EXECUTOR_BASE", "http://executor:8001")
@@ -14,15 +15,11 @@ def _price(symbol: str) -> float:
         return float(body["price"])
 
 
-def _fetch_open_positions(conn):
-    try:
-        cur = conn.execute("select symbol, side, 0.0::numeric as qty, 0.0::numeric as avg_price from executions where status='OPEN'")
-        return cur.fetchall()
-    except Exception:
-        return []
-
-
 def update_equity(mark_only: bool = False):
+    """
+    Update equity including unrealized PnL from open positions.
+    Now uses the comprehensive position tracking system.
+    """
     with psycopg.connect(PG_DSN) as conn:
         cur = conn.execute("select equity, high_water_mark, max_drawdown from equity_stats order by ts desc limit 1")
         row = cur.fetchone()
@@ -30,21 +27,47 @@ def update_equity(mark_only: bool = False):
         hwm = float(row[1]) if row else equity
         mdd = float(row[2]) if row else 0.0
 
-        realized = 0.0
-        unreal = 0.0
-        for symbol, side, qty, avg_px in _fetch_open_positions(conn):
-            px = _price(symbol)
-            pnl = (px - float(avg_px)) * float(qty) if str(side).lower() == "buy" else (float(avg_px) - px) * float(qty)
-            unreal += pnl
+        # Update position prices and get unrealized PnL
+        if not mark_only:
+            update_position_prices(mark_only=False)
+        
+        # Get realized PnL from closed positions since last update
+        cur = conn.execute(
+            """
+            SELECT COALESCE(SUM(realized_pnl), 0), COALESCE(SUM(fees_paid), 0)
+            FROM positions
+            WHERE closed_at IS NOT NULL
+            AND closed_at > (SELECT MAX(ts) FROM equity_stats)
+            """
+        )
+        realized_row = cur.fetchone()
+        realized_pnl = float(realized_row[0]) if realized_row[0] else 0.0
+        fees_paid = float(realized_row[1]) if realized_row[1] else 0.0
 
-        new_equity = equity + realized + unreal
+        # Get unrealized PnL from open positions
+        open_positions = get_open_positions()
+        unrealized_pnl = sum(pos["unrealized_pnl"] for pos in open_positions)
+        total_fees = sum(pos["fees_paid"] for pos in open_positions)
+
+        # Calculate new equity
+        # Equity = previous equity + realized PnL + unrealized PnL - fees
+        new_equity = equity + realized_pnl + unrealized_pnl - fees_paid - total_fees
         new_hwm = max(hwm, new_equity)
         new_mdd = max(mdd, new_hwm - new_equity)
         romad = (new_equity - 0.0) / new_mdd if new_mdd > 1e-9 else float("inf")
 
+        # Get portfolio exposure
+        exposure = get_portfolio_exposure()
+
         conn.execute(
-            "insert into equity_stats (equity, high_water_mark, max_drawdown, romad) values (%s,%s,%s,%s)",
-            (new_equity, new_hwm, new_mdd, (romad if math.isfinite(romad) else None)),
+            "insert into equity_stats (equity, high_water_mark, max_drawdown, romad, notes) values (%s,%s,%s,%s,%s)",
+            (
+                new_equity,
+                new_hwm,
+                new_mdd,
+                (romad if math.isfinite(romad) else None),
+                f"unrealized_pnl={unrealized_pnl:.2f} realized={realized_pnl:.2f} exposure={exposure.get('leverage', 0):.2f}x",
+            ),
         )
         conn.commit()
         return {
@@ -52,5 +75,9 @@ def update_equity(mark_only: bool = False):
             "hwm": float(new_hwm),
             "mdd": float(new_mdd),
             "romad": (float(romad) if math.isfinite(romad) else None),
+            "unrealized_pnl": unrealized_pnl,
+            "realized_pnl": realized_pnl,
+            "total_fees": fees_paid + total_fees,
+            "leverage": exposure.get("leverage", 0.0),
         }
 

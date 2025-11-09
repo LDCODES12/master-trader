@@ -75,12 +75,47 @@ async def compute_counterfactual(symbol: str, entry_price: float) -> dict:
 @activity.defn
 async def record_execution(order_id: str, proposal: dict, exec_res: dict):
     body = exec_res.get("body")
+    venue = exec_res.get("venue", "binance") or "binance"
+    
     with psycopg.connect("dbname=mastertrader user=trader password=traderpw host=db") as conn:
         conn.execute(
             "insert into executions(proposal_id, venue, order_id, status, fills, error) values (NULL, %s, %s, %s, %s, %s)",
-            ("binance", order_id, str(exec_res.get("code")), json.dumps(body) if body is not None else None, None),
+            (venue, order_id, str(exec_res.get("code")), json.dumps(body) if body is not None else None, None),
         )
         conn.commit()
+    
+    # Track position if trade was filled
+    if body and exec_res.get("code") in (200, 201):
+        try:
+            from apps.analytics.positions import open_position
+            
+            symbol = proposal.get("symbol", body.get("symbol", "BTCUSDT"))
+            side = proposal.get("side", "buy")
+            
+            # Extract fill details
+            fills = body.get("fills", [])
+            if fills:
+                total_qty = sum(float(f.get("qty", 0)) for f in fills)
+                total_quote = sum(float(f.get("quoteQty", f.get("quote_qty", 0))) for f in fills)
+                avg_price = float(body.get("avg_price", 0)) or (total_quote / total_qty if total_qty > 0 else 0)
+                fees = sum(float(f.get("commission", 0)) for f in fills)
+                
+                if total_qty > 0 and avg_price > 0:
+                    open_position(
+                        symbol=symbol,
+                        side=side,
+                        base_qty=total_qty,
+                        quote_qty=total_quote,
+                        entry_price=avg_price,
+                        execution_id=order_id,
+                        venue=venue,
+                        fees_paid=fees,
+                    )
+        except Exception as e:
+            # Log error but don't fail the execution record
+            import logging
+            logging.warning(f"Failed to track position: {e}")
+    
     return True
 
 

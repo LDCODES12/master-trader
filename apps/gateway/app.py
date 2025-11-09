@@ -12,6 +12,24 @@ from apps.analytics.equity import update_equity
 
 app = FastAPI()
 
+# Keep-alive mechanism for free tier (prevents spin-down)
+async def keep_alive_loop():
+    """Ping ourselves every 10 minutes to keep free tier active"""
+    await asyncio.sleep(60)  # Wait 1 minute after startup
+    while True:
+        try:
+            # Lightweight self-ping to keep service active
+            async with httpx.AsyncClient() as client:
+                await client.get(f"http://localhost:{os.getenv('PORT', '8000')}/status", timeout=5)
+        except Exception:
+            pass  # Ignore errors, just keep trying
+        await asyncio.sleep(600)  # Every 10 minutes
+
+@app.on_event("startup")
+async def startup_event():
+    """Start keep-alive loop on startup"""
+    asyncio.create_task(keep_alive_loop())
+
 
 class SubmitReq(BaseModel):
     proposal: Proposal

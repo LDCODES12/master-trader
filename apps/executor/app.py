@@ -2,6 +2,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os, time, hmac, hashlib, httpx
 from .utils.market_data import get_latest_close_http, get_latest_close_replay, compute_simulated_fill
+from .utils.paper_trading import execute_paper_trade
+from .utils.routing import route_order
+from .utils.fees import calculate_fees
 
 
 app = FastAPI()
@@ -31,6 +34,31 @@ async def price(symbol: str, interval: str = "1m"):
 async def orders(req: OrderReq):
     exec_mode = os.getenv("EXEC_MODE", "dry_run").lower()
     v = req.venue.lower()
+    
+    # Paper trading mode - simulate with real market data and track positions
+    if exec_mode == "paper":
+        try:
+            # Use smart routing to find best venue (or use requested venue)
+            best_venue, routing_info = await route_order(
+                req.symbol, req.side, req.quote_qty, preferred_venue=v
+            )
+            
+            # Execute paper trade
+            result = await execute_paper_trade(
+                req.symbol, req.side, req.quote_qty, best_venue, req.idempotency_key
+            )
+            
+            return {
+                "status": 200,
+                "body": result,
+                "routing": {
+                    "selected_venue": best_venue,
+                    "routing_info": routing_info,
+                },
+            }
+        except Exception as e:
+            raise HTTPException(500, f"Paper trading error: {str(e)}")
+    
     if v == "binance":
         if exec_mode == "live":
             return await place_binance(req)

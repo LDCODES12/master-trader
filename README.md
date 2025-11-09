@@ -1,91 +1,147 @@
-## MasterTrader Scaffold
+# MasterTrader - Automated Trading System
 
-Minimal, production-style scaffold for a durable LLM trader with hard rails using Temporal, FastAPI, and Postgres.
+Automated cryptocurrency trading system with LLM-powered decision making, built on Temporal, FastAPI, and PostgreSQL.
 
-### Repo layout
+## 🚀 Quick Start
+
+### Local Development
+
+```bash
+# One command to start everything
+./start.sh
+
+# Or use Make
+make start
+```
+
+This automatically:
+- ✅ Checks and starts Docker
+- ✅ Creates `.env` with defaults
+- ✅ Builds and starts all services
+- ✅ Runs database migrations
+- ✅ Starts health monitoring
+- ✅ Starts auto-optimization
+
+### Cloud Deployment (24/7)
+
+Deploy to Render.com for true 24/7 operation:
+
+1. **Create PostgreSQL database** on Render (Starter plan)
+2. **Create Web Service**:
+   - Connect GitHub repo
+   - Environment: **Docker**
+   - Dockerfile Path: `Dockerfile.production`
+   - Plan: **Starter** ($7/month)
+   - Environment Variables:
+     - `DATABASE_URL` = (Internal Database URL from PostgreSQL)
+     - `EXEC_MODE` = `paper`
+     - `AGENT_MODE` = `llm`
+     - `PORT` = `8000`
+
+See `render.yaml` for configuration.
+
+## 📁 Project Structure
 
 ```
-infra/
-  docker-compose.yml
-  migrations/
-    000_temporal.sql
-    001_init.sql
-libs/
-  schemas/proposal.py
 apps/
-  executor/
-    app.py
-    venues/
-      binance (in app.py)
-      kraken.py
-      coinbase.py
-    Dockerfile
-  agent_brain/
-    graph.py
-    prompts/proposal.md
-  temporal_worker/
-    worker.py
-    workflows.py
-    activities.py
-    Dockerfile
-  gateway/
-    app.py
-    Dockerfile
-requirements.txt
-.env.example
+  agent_brain/     # LLM debate system (LangGraph)
+  analytics/        # Equity tracking, positions, PnL
+  attention/        # ASLF scoring mechanism
+  executor/         # Trade execution (paper/live)
+  gateway/          # FastAPI HTTP API
+  monitor/          # Health checks, auto-optimization
+  temporal_worker/  # Temporal workflows
+infra/
+  docker-compose.yml  # Local development
+  migrations/         # Database schema
+config/
+  profit_maximization.py  # Aggressive profit settings
+scripts/
+  auto_setup.sh           # Automated setup
+  start_monitor.sh        # Health monitoring
+  start_auto_optimizer.sh # Continuous learning
 ```
 
-### Dependencies
+## ⚙️ Configuration
 
-- Python 3.11
-- Packages are pinned in `requirements.txt`
-
-### Quickstart
-
-1) Copy environment file and fill testnet keys:
+Edit `.env` (created automatically):
 
 ```bash
-cp .env.example .env
-# Fill BINANCE_API_KEY / BINANCE_API_SECRET (Testnet)
+# Execution mode
+EXEC_MODE=paper  # Start with paper trading!
+
+# LLM agents
+AGENT_MODE=llm
+OPENAI_API_KEY=your_key_here
+
+# Profit maximization (aggressive defaults)
+MAX_POSITION_SIZE_PCT=20.0
+MAX_PORTFOLIO_EXPOSURE_PCT=300.0
+ASLF_THETA_BUY=0.8
+FRACTIONAL_KELLY_MAX=0.5
+
+# Risk management
+MAX_DRAWDOWN_PCT=25.0
+MAX_DAILY_LOSS_PCT=10.0
 ```
 
-2) Bring up services:
+## 🎯 Key Features
+
+- **LLM-Powered Trading**: Multi-agent debate system (Reader, Proposer, Skeptic, Referee)
+- **Position Tracking**: Real-time PnL, portfolio exposure, risk metrics
+- **Paper Trading**: Safe testing mode before going live
+- **Smart Execution**: TWAP/VWAP algorithms, smart order routing
+- **Auto-Optimization**: Continuous learning and parameter tuning
+- **Health Monitoring**: Auto-restart failed services
+- **24/7 Operation**: Runs continuously, survives reboots
+
+## 📊 Monitoring
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build
+make status      # Check system health
+make logs-all    # View all logs
+curl http://localhost:8000/metrics  # Performance metrics
 ```
 
-3) Submit a demo proposal (Temporal workflow):
+## 🧪 Testing
 
 ```bash
+# Submit a test trade proposal
 python scripts/submit_example.py
-```
 
-4) Call the executor status:
+# Check executor status
+curl http://localhost:8001/status
 
-```bash
-curl -s http://localhost:8001/status
-```
-
-5) Submit via HTTP gateway:
-
-```bash
+# Submit via HTTP
 curl -X POST http://localhost:8000/submit-proposal \
   -H 'content-type: application/json' \
-  -d '{"proposal":{"action":"open","symbol":"BTCUSDT","side":"buy","size_bps_equity":4.0,"horizon_minutes":120,"thesis":"stub","risk":{"stop_loss_bps":60,"take_profit_bps":120,"max_slippage_bps":3},"evidence":[{"url":"https://example.com","type":"news_headline"}],"confidence":0.7}}'
+  -d '{"proposal":{"action":"open","symbol":"BTCUSDT","side":"buy","size_bps_equity":4.0,"horizon_minutes":120,"thesis":"test","risk":{"stop_loss_bps":60,"take_profit_bps":120,"max_slippage_bps":3},"evidence":[{"url":"https://example.com","type":"news_headline"}],"confidence":0.7}}'
 ```
 
-### Features
+## 🔧 Make Commands
 
-- Debate Brain (LangGraph): Reader → Proposer → Skeptic → Referee with consensus threshold (`CONSENSUS_MIN`).
-- Live RAG (stub): `apps/rag/collector.py` provides normalized docs; Reader injects into state.
-- Provenance Lock: `verify_evidence` stores SHA-256 + C2PA status; `reverify_evidence` aborts on change.
-- Counterfactual PnL: child `PostmortemWorkflow` computes counterfactual delta after horizon.
-- Preflight: `GET /preflight` on Gateway checks Binance server time, ping, and Temporal connectivity.
- - ASLF Rule: Attention-Surprise × Liquidity-Friction gate; `GET /aslf?symbol=BTCUSDT&notional=25` for live debug. Thresholds via env: `ASLF_THETA_BUY`, `ASLF_THETA_FADE`, `ASLF_LAMBDA`, `LMF_ALPHA/BETA/GAMMA`, `FRACTIONAL_KELLY_MAX`.
- - RAG Fetchers (live sources): configure in `.env`:
-   - `RAG_RSS_SOURCES=https://www.coindesk.com/arc/outboundfeeds/rss/,https://cointelegraph.com/rss`
-   - `RAG_HTTP_SOURCES=https://www.binance.com/en/support/announcement`
-   - `RAG_TIMEOUT_S=6`, `RAG_MAX_DOCS=8`
+```bash
+make start          # Start everything
+make status         # Check health
+make logs-all       # View logs
+make stop           # Stop monitoring
+make full-restart   # Restart everything
+```
 
+## 📝 Requirements
 
+- Python 3.11+
+- Docker & Docker Compose
+- PostgreSQL (via Docker or cloud)
+- OpenAI API key (for LLM mode)
+
+## ⚠️ Important Notes
+
+- **Start with paper trading** (`EXEC_MODE=paper`) for safety
+- **Starter plan required** on Render for true 24/7 operation (Free tier spins down)
+- **Database migrations** run automatically on startup
+- **Health monitoring** auto-restarts failed services
+
+## 📄 License
+
+See LICENSE file for details.

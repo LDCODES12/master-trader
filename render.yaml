@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: mastertrader
+    env: docker
+    dockerfilePath: ./Dockerfile.production
+    dockerContext: .
+    plan: starter
+    envVars:
+      - key: EXEC_MODE
+        value: paper
+      - key: AGENT_MODE
+        value: llm
+      - key: PORT
+        value: 8000
+    healthCheckPath: /status
+    autoDeploy: true
+
+databases:
+  - name: mastertrader-db
+    plan: starter
+    databaseName: mastertrader
+    user: trader
+
